@@ -1,0 +1,13 @@
+[package]
+name = "cx65"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+fltk = { version = "^1.4", features = ["fltk-bundled"] }
+fltk-theme = "0.7.2"
+dbgdata = {path="../db65/dbgdata"}
+util = {path="../db65/util"}
+anyhow = "1.0.79"
