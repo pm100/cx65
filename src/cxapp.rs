@@ -4,20 +4,23 @@ use dialog::FileDialogType::BrowseFile;
 use fltk::{
     app::{self, App, Receiver, Scheme},
     dialog,
-    prelude::BrowserExt,
+    prelude::{BrowserExt, WidgetExt},
 };
+use fltk_desk::ui::misc::Theme;
 #[derive(Copy, Clone)]
 pub enum Message {
     Quit,
     LoadBinary,
-    SegList,
+    SegListPick,
+    MenuEditCut,
 }
 
 pub struct CxApp {
     app: App,
     channel: Receiver<Message>,
-    main_win: mainui::UI,
+    ui: mainui::UI,
     engine: Engine,
+    symhid: bool,
 }
 pub fn center() -> (i32, i32) {
     (
@@ -27,16 +30,17 @@ pub fn center() -> (i32, i32) {
 }
 
 impl CxApp {
-    pub fn new() -> Result<Self> {
+    pub fn new(theme: &'static Theme) -> Result<Self> {
         let (s, r) = app::channel::<Message>();
         let app = App::default().with_scheme(Scheme::Gtk);
-        let mut ui = mainui::UI::new(&s);
+        let mut ui = mainui::UI::new(&s, theme);
         ui.show();
         Ok(Self {
             app,
             channel: r,
-            main_win: ui,
+            ui,
             engine: Engine::new()?,
+            symhid: false,
         })
     }
     pub fn run(&mut self) {
@@ -67,34 +71,56 @@ impl CxApp {
 
                 let filename = nfc.filename();
                 if !filename.to_string_lossy().to_string().is_empty() {
-                    self.engine.load_dbg_file(nfc.filename().as_path())?;
-                    self.main_win.load_seg_list(&self.engine.seg_list);
+                    self.engine.load_code(nfc.filename().as_path())?;
+                    self.ui.load_seg_list(&self.engine.seg_list);
                 }
             }
-            Message::SegList => {
-                let idx = self.main_win.seglist.selected_row();
-                let row = self.main_win.seglist.get_row(idx.unwrap());
+            Message::SegListPick => {
+                let idx = self.ui.seglist.selected_row();
+                let row = self.ui.seglist.get_row(idx.unwrap());
                 if let Some(r) = row {
                     let segname = r.cells[0].clone();
                     let segs = &self.engine.seg_list;
                     if let Some(seg) = segs.iter().find(|s| s.name.as_str() == segname) {
-                        self.main_win.set_segment(&seg);
+                        self.engine.load_cx_data(seg.id as _, 0, 0xffff)?;
+                        self.ui.csource.clear();
+                        for span in self.engine.cview.iter() {
+                            let filename = self
+                                .engine
+                                .lookup_file_by_id(span.file_id as _)
+                                .map_or("", |si| &si.short_name);
+                            let text = self
+                                .engine
+                                .find_source_line_by_line_no(span.file_id, span.line_no)?
+                                .map_or_else(|| String::new(), |si| si.line);
+                            self.ui.csource.append(&format!(
+                                "{}:{}\t{}\t{}\n",
+                                filename, span.line_no, text, span.absaddr
+                            ));
+                        }
                     } else {
                         bail!("unknown segment {}", segname);
                     }
                 }
-                // for i in self.main_win.seglist.selected_items().iter() {
-                //     println!("Selected: {}", i);
-                //     let segname: &str = unsafe { self.main_win.seglist.data(*i).unwrap() };
-                //     let segs = &self.engine.seg_list;
-                //     if let Some(seg) = segs.iter().find(|s| s.name.as_str() == segname) {
-                //         self.main_win.set_segment(&seg);
-                //     } else {
-                //         bail!("unknown segment {}", segname);
-                //     }
-                // }
-                self.main_win.seglist.redraw();
+
+                self.ui.seglist.redraw();
             }
+            Message::MenuEditCut => {
+                let mut rect = self.ui.seglist.get_rect();
+                rect.h = 166;
+                rect.y = 34;
+                self.ui.seglist.set_rect(rect);
+
+                let mut rect = self.ui.symlist.get_rect();
+                rect.h = 500;
+                rect.y = 34 + 166;
+                self.ui.symlist.set_rect(rect);
+
+                self.ui.seglist.redraw();
+
+                self.ui.symlist.redraw();
+                //    self.main_win.tile.redraw();
+            } //self.main_win.tile
         }
         Ok(false)
     }

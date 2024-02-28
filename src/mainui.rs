@@ -1,37 +1,63 @@
-use dbgdata::debugdb::Segment;
+use dbgdata::debugdb::{Segment, SourceInfo};
 use fltk::{
     app, browser,
+    draw::Rect,
     enums::{self, Color, Font, FrameType, Shortcut},
     group, menu,
     prelude::{BrowserExt, GroupExt, MenuExt, WidgetBase, WidgetExt, WindowExt},
     window,
 };
-
-use crate::{
-    cxapp::Message,
-    listbox::{ColumnDefinition, ListBox, Rect, Row},
+use fltk_desk::ui::{
+    control::Control,
+    listbox::{ColumnDefinition, ListBox, Row},
+    misc::Theme,
+    splitter::Splitter,
+    textbox::TextBox,
 };
+
+use crate::cxapp::Message;
 
 pub struct UI {
     main_win: window::Window,
     menu: MainMenu,
-    tile: group::Tile,
-    pub seglist: ListBox, //browser::HoldBrowser,
-    browser2: browser::HoldBrowser,
+    // pub tile: group::Tile,
+    theme: &'static Theme,
+    pub seglist: ListBox,
+    pub symlist: ListBox,
+    pub csource: TextBox, //<Message>,
+    //pub browser2: browser::HoldBrowser,
     send_channel: app::Sender<Message>,
 }
 
 impl UI {
-    pub fn new(channel: &app::Sender<Message>) -> UI {
+    pub fn new(channel: &app::Sender<Message>, theme: &'static Theme) -> UI {
         let mut main_win = window::Window::default()
             .with_size(800, 600)
             .center_screen()
             .with_label("cx65 - Code Explorer for the cc65 toolchain");
-        let menu = MainMenu::new(channel);
-        main_win.set_color(Color::White);
-        let mut tile = group::Tile::new(0, 35, 800, 600 - 35, None);
-        tile.set_color(enums::Color::White);
-        // let mut seglist = browser::HoldBrowser::new(0, 35, 400, 600 - 35, "0");
+        let menu = MainMenu::new(channel, theme);
+        let mut vsplitter = Splitter::new(
+            Rect {
+                x: 0,
+                y: 34,
+                w: 800,
+                h: 600 - 34,
+            },
+            theme,
+            true,
+        );
+        let mut hsplitter = Splitter::new(
+            Rect {
+                x: 0,
+                y: 34,
+                w: 800,
+                h: 600 - 34,
+            },
+            theme,
+            false,
+        );
+        // tile.set_color(enums::Color::White);
+
         let cols = vec![
             ColumnDefinition {
                 name: "Name".to_string(),
@@ -39,7 +65,7 @@ impl UI {
             },
             ColumnDefinition {
                 name: "Start".to_string(),
-                width: 30,
+                width: 40,
             },
             ColumnDefinition {
                 name: "Size".to_string(),
@@ -49,27 +75,65 @@ impl UI {
         let mut seglist = ListBox::new(
             Rect {
                 x: 0,
+                y: 34,
+                w: 400,
+                h: (600 - 34) / 2,
+            },
+            &cols,
+            theme,
+        );
+        let sym_cols = vec![
+            ColumnDefinition {
+                name: "Name".to_string(),
+                width: 100,
+            },
+            ColumnDefinition {
+                name: "Value".to_string(),
+                width: 40,
+            },
+            ColumnDefinition {
+                name: "Type".to_string(),
+                width: 40,
+            },
+        ];
+        let mut symlist = ListBox::new(
+            Rect {
+                x: 0,
+                y: 34 + (600 - 34) / 2,
+                w: 400,
+                h: (600 - 34) / 2,
+            },
+            &sym_cols,
+            theme,
+        );
+        // seglist.emit(*channel, Message::SegListPick);
+        hsplitter.add(seglist.clone());
+        hsplitter.add(symlist.clone());
+        vsplitter.add(hsplitter);
+        //  let mut c = browser::HoldBrowser::new(400, 35, 400, 600 - 35, "1");
+        let csource = TextBox::new(
+            Rect {
+                x: 400,
                 y: 35,
                 w: 400,
                 h: 600 - 35,
             },
-            &cols,
-            "seglist",
+            theme,
         );
-        seglist.emit(*channel, Message::SegList);
-
-        let mut c = browser::HoldBrowser::new(400, 35, 400, 600 - 35, "1");
-        main_win.make_resizable(true);
-        // tile.resizable(&main_win);
-        main_win.resizable(&tile);
+        vsplitter.add(csource.clone());
+        main_win.add(&vsplitter.fl_widget());
+        //  main_win.resizable(&tile);
         main_win.end();
         UI {
             main_win,
             menu,
-            tile,
+            // tile,
             seglist,
-            browser2: c,
+            symlist,
+            csource,
+            //  browser2: c,
             send_channel: channel.clone(),
+            theme,
         }
     }
     pub fn load_seg_list(&mut self, seg_list: &Vec<Segment>) {
@@ -98,14 +162,20 @@ impl UI {
     pub fn show(&mut self) {
         self.main_win.show();
     }
+    pub fn update_cx(&mut self, data: &Vec<SourceInfo>) {
+        self.csource.clear();
+        for span in data.iter() {
+            self.csource.append(span.line.as_str());
+        }
+    }
     pub fn set_segment(&mut self, seg: &Segment) {
-        self.browser2.clear();
+        self.csource.clear();
 
         for chunk in seg.modules.iter() {
-            self.browser2.add(&format!(
-                "@t{}\t{}\t{}",
-                chunk.module_name, chunk.offset, chunk.size
-            ));
+            // self.browser2.add(&format!(
+            //     "@t{}\t{}\t{}",
+            //     chunk.module_name, chunk.offset, chunk.size
+            // ));
         }
 
         //  self.browser2.add(&format!("Segment: {}", segname));
@@ -121,12 +191,18 @@ fn menu_cb(m: &mut impl MenuExt) {
     }
 }
 impl MainMenu {
-    pub fn new(channel: &app::Sender<Message>) -> Self {
-        let mut menu = menu::SysMenuBar::default().with_size(800, 35);
-
+    pub fn new(channel: &app::Sender<Message>, theme: &Theme) -> Self {
+        let mut menu = menu::SysMenuBar::default().with_size(800, 34);
+        //    menu.set_color(theme.bg);
+        menu.set_color(theme.popbg);
+        menu.set_text_color(theme.fg);
         menu.set_frame(FrameType::FlatBox);
+        //      menu.set_text_color(theme.fg);
+        //        menu.set_frame(FrameType::FlatBox);
+        app::set_menu_linespacing(15);
+        menu.set_selection_color(theme.hl);
         menu.add_emit(
-            "&File/Load Binary..\t",
+            "  &File/Load Binary..\t",
             Shortcut::Ctrl | 'l',
             menu::MenuFlag::Normal,
             *channel,
@@ -134,46 +210,47 @@ impl MainMenu {
         );
 
         menu.add(
-            "&File/Open...\t",
+            "  &File/Open...\t",
             Shortcut::Ctrl | 'o',
             menu::MenuFlag::Normal,
             menu_cb,
         );
 
         menu.add(
-            "&File/Save\t",
+            "  &File/Save\t",
             Shortcut::Ctrl | 's',
             menu::MenuFlag::Normal,
             menu_cb,
         );
 
         menu.add(
-            "&File/Save as...\t",
+            "  &File/Save as...\t",
             Shortcut::Ctrl | 'w',
             menu::MenuFlag::Normal,
             menu_cb,
         );
 
         menu.add(
-            "&File/Print...\t",
+            "  &File/Print...\t",
             Shortcut::Ctrl | 'p',
             menu::MenuFlag::MenuDivider,
             menu_cb,
         );
 
         menu.add_emit(
-            "&File/Quit\t",
+            "  &File/Quit\t",
             Shortcut::Ctrl | 'q',
             menu::MenuFlag::Normal,
             *channel,
             Message::Quit,
         );
 
-        menu.add(
+        menu.add_emit(
             "&Edit/Cut\t",
             Shortcut::Ctrl | 'x',
             menu::MenuFlag::Normal,
-            menu_cb,
+            *channel,
+            Message::MenuEditCut,
         );
 
         menu.add(

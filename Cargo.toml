@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 fltk = { version = "^1.4", features = ["fltk-bundled"] }
-fltk-theme = "0.7.2"
+#fltk = {path = "../fltk-rs/fltk",features = ["fltk-bundled"]}
+#fltk-theme = "0.7.2"
 dbgdata = {path="../db65/dbgdata"}
 util = {path="../db65/util"}
+fltk_desk = {path="../fl-desk"}
 anyhow = "1.0.79"
